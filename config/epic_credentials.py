@@ -1,31 +1,29 @@
 """
-Epic Games Developer API Configuration
-
-🚨 SECURITY WARNING: This file contains sensitive API credentials
-🔒 NEVER commit this file to version control with real credentials
-📋 REQUIRED: Register your application at https://dev.epicgames.com/portal
-
-PROPER SETUP INSTRUCTIONS:
-1. Go to https://dev.epicgames.com/portal
-2. Create a new application
-3. Get your Client ID and Client Secret
-4. Replace the placeholder values below
-5. Add this file to .gitignore
+Epic Games Developer API Configuration (env-only)
+- Reads EPIC_CLIENT_ID, EPIC_CLIENT_SECRET, EPIC_DEPLOYMENT_ID from environment
+- No hardcoded placeholders or fallbacks
 """
 
 import os
 from typing import Dict, List
 from dotenv import load_dotenv
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
 
-# 🔧 PRODUCTION CREDENTIALS (Official Epic Games Developer Portal)
+def _required(name: str) -> str:
+    val = os.getenv(name)
+    if not val:
+        raise ValueError(f"Missing required environment variable: {name}")
+    return val
+
+# Credentials strictly from environment
 EPIC_CLIENT_CREDENTIALS = {
-    "client_id": os.getenv("EPIC_CLIENT_ID", "YOUR_EPIC_CLIENT_ID_HERE"),
-    "client_secret": os.getenv("EPIC_CLIENT_SECRET", "YOUR_EPIC_CLIENT_SECRET_HERE"),
-    "deployment_id": os.getenv("EPIC_DEPLOYMENT_ID", "BDG"),
-    "user_agent": "EpicGamesBot/1.0.0 (Official Epic Games Developer API)"
+    "client_id": _required("EPIC_CLIENT_ID"),
+    "client_secret": _required("EPIC_CLIENT_SECRET"),
+    "deployment_id": _required("EPIC_DEPLOYMENT_ID"),
+    "user_agent": os.getenv("EPIC_USER_AGENT", "EpicGamesBot/1.0.0 (Official Epic Games Developer API)")
 }
 
 # 🚫 NO FALLBACK CREDENTIALS - Only use Epic Developer Portal credentials
@@ -39,7 +37,7 @@ EPIC_ENDPOINTS = {
     "jwks": "https://api.epicgames.dev/epic/oauth/v2/.well-known/jwks.json"
 }
 
-# 🎮 FORTNITE SPECIFIC ENDPOINTS (Legacy - may change)
+# Fortnite endpoints
 FORTNITE_ENDPOINTS = {
     "profile": "https://fortnite-public-service-prod11.ol.epicgames.com/fortnite/api/game/v2/profile/{}/client/QueryProfile",
     "stats": "https://fortnite-public-service-prod11.ol.epicgames.com/fortnite/api/stats/accountId/{}/bulk/window/alltime"
@@ -48,13 +46,6 @@ FORTNITE_ENDPOINTS = {
 # 🔐 OAUTH SCOPES
 REQUIRED_SCOPES = "basic_profile friends_list presence"
 
-# ⚙️ API SETTINGS
-API_SETTINGS = {
-    "request_timeout": 30,
-    "max_retries": 3,
-    "rate_limit_delay": 1.0,
-    "user_agent_fallback": "EpicGamesLauncher/10.15.3-14907503+++Portal+Release-Live"
-}
 
 def get_primary_credentials() -> Dict[str, str]:
     """Get primary Epic Games credentials (from environment only)"""
@@ -65,6 +56,31 @@ def get_all_credentials() -> List[Dict[str, str]]:
     return [EPIC_CLIENT_CREDENTIALS]
 
 def is_production_ready() -> bool:
-    """Check if production Epic Games credentials are configured"""
-    return (EPIC_CLIENT_CREDENTIALS["client_id"] != "YOUR_EPIC_CLIENT_ID_HERE" and
-            EPIC_CLIENT_CREDENTIALS["client_secret"] != "YOUR_EPIC_CLIENT_SECRET_HERE")
+    """True when all required env vars are present (no placeholders)."""
+    try:
+        return all(bool(EPIC_CLIENT_CREDENTIALS.get(k)) for k in ("client_id", "client_secret", "deployment_id"))
+    except Exception:
+        return False
+
+
+def validate_client_credentials(timeout: int = 15) -> dict:
+    """Perform a small OAuth request to sanity-check client credentials.
+    Returns a dict like {ok: bool, status_code: int, error?: str}."""
+    try:
+        auth = (EPIC_CLIENT_CREDENTIALS["client_id"], EPIC_CLIENT_CREDENTIALS["client_secret"])
+        headers = {"User-Agent": EPIC_CLIENT_CREDENTIALS["user_agent"]}
+        data = {"grant_type": "client_credentials", "deployment_id": EPIC_CLIENT_CREDENTIALS["deployment_id"]}
+        resp = requests.post(EPIC_ENDPOINTS["oauth_token"], auth=auth, headers=headers, data=data, timeout=timeout)
+        if resp.status_code == 200:
+            return {"ok": True, "status_code": 200}
+        err = None
+        try:
+            j = resp.json()
+            err = j.get("errorCode") or j.get("error") or resp.text[:200]
+        except Exception:
+            err = resp.text[:200]
+        if isinstance(err, str) and "invalid_client" in err.lower():
+            return {"ok": False, "status_code": resp.status_code, "error": "invalid_client (check client id/secret)"}
+        return {"ok": True, "status_code": resp.status_code, "error": str(err)}
+    except requests.RequestException as e:
+        return {"ok": False, "status_code": -1, "error": str(e)}

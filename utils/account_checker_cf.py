@@ -38,23 +38,21 @@ class AccountCheckerCF:
         self.accounts_url = EPIC_ENDPOINTS["accounts"]
         self.profile_url = FORTNITE_ENDPOINTS["profile"]
         
-        # Load client credentials from configuration
+        # Load client credentials strictly from environment
         self.client_credentials = get_all_credentials()
         
         if not self.client_credentials:
-            raise ValueError("No Epic Games client credentials available. Please configure credentials in config/epic_credentials.py")
+            raise ValueError("No Epic Games client credentials available. Set EPIC_CLIENT_ID, EPIC_CLIENT_SECRET, EPIC_DEPLOYMENT_ID in environment.")
         
-        # Check if production credentials are configured
         if not is_production_ready():
-            print("⚠️  WARNING: Using fallback client credentials (may get disabled)")
-            print("🔧 RECOMMENDED: Register your app at https://dev.epicgames.com/portal")
-            print("📋 REQUIRED: Configure production credentials in config/epic_credentials.py")
+            raise ValueError("Epic Games client credentials not fully configured in environment.")
         
-        # Start with the first available credentials
+        # Use the first (and only) credentials source
         self.current_credentials = self.client_credentials[0]
         self.client_id = self.current_credentials["client_id"]
         self.client_secret = self.current_credentials["client_secret"]
-        self.deployment_id = self.current_credentials.get("deployment_id", "Fortnite")
+        # No defaults/fallbacks
+        self.deployment_id = self.current_credentials["deployment_id"]
         self.basic_auth = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
         self.user_agent = self.current_credentials.get("user_agent", "EpicGamesLauncher/10.15.3")
         
